@@ -9,6 +9,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/leaderelection"
 	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"k8s.io/klog"
@@ -40,11 +41,22 @@ func main() {
 		klog.Fatal("missing identity flag")
 	}
 
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		klog.Fatalf("failed to get kubeconfig")
+	var config *rest.Config
+	var client *clientset.Clientset
+	if os.Getenv("KUBECONFIG") != "" {
+		if c, err := clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG")); err != nil {
+			klog.Fatalln("failed to read KUBECONFIG")
+		} else {
+			config = c
+		}
+	} else {
+		if c, err := rest.InClusterConfig(); err != nil {
+			klog.Fatalf("failed to get kubeconfig")
+		} else {
+			config = c
+		}
 	}
-	client := clientset.NewForConfigOrDie(config)
+	client = clientset.NewForConfigOrDie(config)
 
 	lock := &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
@@ -64,6 +76,10 @@ func main() {
 		RenewDeadline:   8 * time.Second,
 		RetryPeriod:     1 * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
+			OnStartedLeading: func(ctx context.Context) {
+			},
+			OnStoppedLeading: func() {
+			},
 			OnNewLeader: func(currentIdentity string) {
 				if err := os.WriteFile("/tmp/k8s-leader", []byte(currentIdentity), 0644); err != nil {
 					klog.Fatal("unable to write /tmp/k8s-leader")

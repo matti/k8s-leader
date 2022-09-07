@@ -5,6 +5,7 @@ go 1.18
 require k8s.io/apimachinery v0.25.0
 
 require (
+	github.com/imdario/mergo v0.3.6 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
 	golang.org/x/time v0.0.0-20220210224613-90d013bbcef8 // indirect
 	k8s.io/api v0.25.0 // indirect
