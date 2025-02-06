@@ -4,9 +4,12 @@ import (
 	"context"
 	"flag"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	clientset "k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
@@ -18,6 +21,14 @@ import (
 func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		sig := <-signalChan
+		klog.Infof("Received signal: %s", sig)
+		cancel()
+	}()
 
 	var (
 		leaseLockName      string
@@ -69,6 +80,23 @@ func main() {
 		},
 	}
 
+	for {
+		if existingLock, err := client.CoordinationV1().Leases(leaseLockNamespace).Get(ctx, leaseLockName, metav1.GetOptions{}); err != nil {
+			klog.Errorf("Error while checking existing lock: %s", err)
+		} else if existingLock.Spec.HolderIdentity != nil && *existingLock.Spec.HolderIdentity == identity {
+			klog.Errorf("Lock with identity %s already exists", identity)
+		} else {
+			break
+		}
+
+		if ctx.Err() != nil {
+			os.Exit(0)
+		}
+
+		time.Sleep(3 * time.Second)
+	}
+
+	klog.Info("Starting leader election")
 	leaderConfig := leaderelection.LeaderElectionConfig{
 		Lock:            lock,
 		ReleaseOnCancel: true,
@@ -77,16 +105,55 @@ func main() {
 		RetryPeriod:     1 * time.Second,
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
+				klog.Info("started leading")
 			},
 			OnStoppedLeading: func() {
+				klog.Info("stopped leading")
 			},
 			OnNewLeader: func(currentIdentity string) {
+				if currentIdentity != identity {
+					klog.Infof("Somebody else is leader: %s", currentIdentity)
+				} else {
+					klog.Infof("I am the leader")
+				}
+
+				podName := os.Getenv("HOSTNAME")
+				podNamespace := os.Getenv("NAMESPACE")
+				if podName == "" || podNamespace == "" {
+					klog.Error("HOSTNAME or NAMESPACE environment variable is not set")
+					return
+				}
+
+				patch := []byte(`{
+					"metadata": {
+						"labels": {
+							"k8s-leader": "yes"
+						}
+					}
+				}`)
+				_, err := client.CoreV1().Pods(podNamespace).Patch(ctx, podName, types.StrategicMergePatchType, patch, metav1.PatchOptions{})
+				if err != nil {
+					klog.Errorf("Failed to label pod: %v", err)
+				} else {
+					klog.Info("Pod labeled as k8s-leader=yes")
+				}
+
 				if err := os.WriteFile("/tmp/k8s-leader", []byte(currentIdentity), 0644); err != nil {
-					klog.Fatal("unable to write /tmp/k8s-leader")
+					klog.Error("unable to write /tmp/k8s-leader")
 				}
 			},
 		},
 	}
 
-	leaderelection.RunOrDie(ctx, leaderConfig)
+	for {
+		leaderelection.RunOrDie(ctx, leaderConfig)
+		if ctx.Err() != nil {
+			break
+		}
+
+		klog.Info("RunOrDie exited without ctx done, retrying")
+		time.Sleep(1 * time.Second)
+	}
+
+	klog.Info("bye")
 }

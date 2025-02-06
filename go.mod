@@ -1,6 +1,6 @@
 module github.com/matti/k8s-leader
 
-go 1.18
+go 1.22.5
 
 require k8s.io/apimachinery v0.25.0
 
