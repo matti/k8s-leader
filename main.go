@@ -106,17 +106,6 @@ func main() {
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				klog.Info("started leading")
-			},
-			OnStoppedLeading: func() {
-				klog.Info("stopped leading")
-			},
-			OnNewLeader: func(currentIdentity string) {
-				if currentIdentity != identity {
-					klog.Infof("Somebody else is leader: %s", currentIdentity)
-				} else {
-					klog.Infof("I am the leader")
-				}
-
 				podName := os.Getenv("HOSTNAME")
 				podNamespace := os.Getenv("NAMESPACE")
 				if podName == "" || podNamespace == "" {
@@ -136,6 +125,16 @@ func main() {
 					klog.Errorf("Failed to label pod: %v", err)
 				} else {
 					klog.Info("Pod labeled as k8s-leader=yes")
+				}
+			},
+			OnStoppedLeading: func() {
+				klog.Info("stopped leading")
+			},
+			OnNewLeader: func(currentIdentity string) {
+				if currentIdentity != identity {
+					klog.Infof("Somebody else is leader: %s", currentIdentity)
+				} else {
+					klog.Infof("I am the leader")
 				}
 
 				if err := os.WriteFile("/tmp/k8s-leader", []byte(currentIdentity), 0644); err != nil {
