@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	clientset "k8s.io/client-go/kubernetes"
@@ -80,8 +81,14 @@ func main() {
 		},
 	}
 
+	// No idea why I originally added this
 	for {
 		if existingLock, err := client.CoordinationV1().Leases(leaseLockNamespace).Get(ctx, leaseLockName, metav1.GetOptions{}); err != nil {
+			klog.Errorf("Error while checking existing lock: %s", err)
+			if errors.IsNotFound(err) {
+				klog.Infof("Lease %s not found, proceeding with leader election", leaseLockName)
+				break
+			}
 			klog.Errorf("Error while checking existing lock: %s", err)
 		} else if existingLock.Spec.HolderIdentity != nil && *existingLock.Spec.HolderIdentity == identity {
 			klog.Errorf("Lock with identity %s already exists", identity)
